@@ -1,48 +1,37 @@
-import cv2
-import pytesseract
-from pdf2image import convert_from_path
+import fitz  # PyMuPDF
 import numpy as np
 import tkinter as tk
 from tkinter import filedialog
 
-# Tesseract OCR'ın yolunu belirtin
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+def extract_rectangles_from_pdf(pdf_path):
+    """
+    PDF dosyasından dikdörtgenleri çıkarır.
+    """
+    doc = fitz.open(pdf_path)  # PDF dosyasını aç
+    rectangles = []
+    for page_num in range(len(doc)):
+        page = doc.load_page(page_num)  # Her sayfayı sırayla yükle
+        shapes = page.get_drawings()  # Sayfadaki çizimleri al
+        for shape in shapes:
+            for item in shape["items"]:
+                if item[0] == "re":  # "re" dikdörtgen anlamına gelir
+                    rect = item[1]
+                    width = int(rect.width)
+                    height = int(rect.height)
+                    rectangles.append((rect, width, height))
+    return rectangles
 
-def extract_text_from_image(image):
+def filter_large_rectangles(rectangles, min_size=1):
     """
-    Görüntüyü gri tonlamaya dönüştürür ve ardından ikili eşikleme uygular.
-    OCR (Optical Character Recognition) kullanarak metni çıkarır.
+    Belirtilen boyuttan büyük olan dikdörtgenleri filtreler.
     """
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)  # Görüntüyü gri tonlamaya dönüştür
-    _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)  # İkili eşikleme uygula
-    return pytesseract.image_to_string(thresh, config='--psm 6')  # OCR kullanarak metni çıkar
+    return [rect for rect in rectangles if rect[1] > min_size and rect[2] > min_size]
 
-def read_optik_form(file_path, poppler_path):
+def calculate_area(width, height):
     """
-    PDF dosyasını görüntüye dönüştürür, belirli bölgelerden metni çıkarır.
+    Dikdörtgenin alanını hesaplar.
     """
-    images = convert_from_path(file_path, poppler_path=poppler_path)  # PDF dosyasını görüntüye dönüştür
-    image = np.array(images[0])  # İlk sayfayı numpy dizisine dönüştür
-    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)  # Görüntüyü BGR renk formatına dönüştür
-    
-    # Okul numarası bölgesi (koordine göre ayarlanmıştır, gerekirse değiştirin)
-    okul_numarası_bölgesi = image[80:180, 100:500]
-    okul_numarası = extract_text_from_image(okul_numarası_bölgesi).strip()  # Okul numarasını çıkar
-    
-    # Cevap anahtarı bölgeleri (koordine göre ayarlanmıştır, gerekirse değiştirin)
-    cevap_anahtarı_bölge1 = image[300:800, 50:450]
-    cevap_anahtarı_bölge2 = image[300:800, 450:850]
-    cevap_anahtarı_bölge3 = image[850:1350, 50:450]
-    cevap_anahtarı_bölge4 = image[850:1350, 450:850]
-    
-    # Her bir bölgeden metni çıkar
-    cevap_anahtarı1 = extract_text_from_image(cevap_anahtarı_bölge1)
-    cevap_anahtarı2 = extract_text_from_image(cevap_anahtarı_bölge2)
-    cevap_anahtarı3 = extract_text_from_image(cevap_anahtarı_bölge3)
-    cevap_anahtarı4 = extract_text_from_image(cevap_anahtarı_bölge4)
-    
-    # Çıkarılan metinleri döndür
-    return okul_numarası, cevap_anahtarı1, cevap_anahtarı2, cevap_anahtarı3, cevap_anahtarı4
+    return width * height
 
 def main():
     """
@@ -51,29 +40,21 @@ def main():
     root = tk.Tk()
     root.withdraw()  # Tkinter GUI penceresini gizle
     
-    # Kullanıcıdan PDF veya görüntü dosyasını seçmesini iste
-    file_path = filedialog.askopenfilename(filetypes=[("PDF files", "*.pdf"), ("Image files", "*.png;*.jpg;*.jpeg")])
+    # Kullanıcıdan PDF dosyasını seçmesini iste
+    file_path = filedialog.askopenfilename(filetypes=[("PDF files", "*.pdf")])
     
     if not file_path:
         print("Dosya seçilmedi.")  # Dosya seçilmezse mesaj yazdır ve çık
         return
     
-    # Poppler'ın kurulu olduğu yolu belirtin
-    poppler_path = r'C:\Program Files\Release-24.02.0-0\poppler-24.02.0\Library\bin'
+    # PDF dosyasından dikdörtgenleri çıkar ve büyük dikdörtgenleri filtrele
+    rectangles = extract_rectangles_from_pdf(file_path)
+    large_rectangles = filter_large_rectangles(rectangles)
     
-    # Optik formu oku ve sonuçları al
-    okul_numarasi, cevap_anahtari1, cevap_anahtari2, cevap_anahtari3, cevap_anahtari4 = read_optik_form(file_path, poppler_path)
-    
-    # Sonuçları yazdır
-    print(f"Okul Numarası: {okul_numarasi}")
-    print("Cevap Anahtarı Bölge 1:")
-    print(cevap_anahtari1)
-    print("Cevap Anahtarı Bölge 2:")
-    print(cevap_anahtari2)
-    print("Cevap Anahtarı Bölge 3:")
-    print(cevap_anahtari3)
-    print("Cevap Anahtarı Bölge 4:")
-    print(cevap_anahtari4)
+    # Dikdörtgenleri ve alanlarını göster
+    for i, (rect, width, height) in enumerate(large_rectangles):
+        area = calculate_area(width, height)
+        print(f"Rectangle {i + 1}: Width: {width}, Height: {height}, Area: {area}")
 
 if __name__ == "__main__":
-    main()  # Ana fonksiyonu çalıştır
+    main()
